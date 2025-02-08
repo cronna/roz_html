@@ -1,120 +1,112 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Розыгрыш</title>
+    <title>Giveaway</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        /* Стили для оформления */
+        .container { padding: 20px; text-align: center; }
+        .hidden { display: none; }
+        .channel-list { list-style: none; padding: 0; }
+        .channel-item { margin: 10px 0; }
     </style>
 </head>
 <body>
-    <div id="loading">Загрузка...</div>
-    <div id="content" style="display: none;">
-        <h1 id="giveaway-name"></h1>
-        <p id="giveaway-description"></p>
-        <div id="channels-list"></div>
-        <button id="participate-btn" disabled>Участвовать</button>
-        <div id="result-message"></div>
+    <div class="container">
+        <div id="participateSection">
+            <button id="participateBtn" onclick="handleParticipate()">Участвовать</button>
+        </div>
+        
+        <div id="channelsSection" class="hidden">
+            <h3>Подпишитесь на каналы:</h3>
+            <ul class="channel-list" id="channelList"></ul>
+            <button onclick="checkSubscriptions()">Проверить подписку</button>
+        </div>
+
+        <div id="successMessage" class="hidden">
+            <h3>Вы успешно участвуете в розыгрыше! 🎉</h3>
+        </div>
     </div>
 
     <script>
-        const webApp = Telegram.WebApp;
-        let giveawayData = null;
+        const tg = window.Telegram.WebApp;
+        let giveawayId = null;
 
-        webApp.ready();
-        webApp.expand();
+        // Инициализация приложения
+        tg.expand();
+        tg.ready();
 
-        // Получаем giveaway_id из параметров запуска
-        const initData = new URLSearchParams(webApp.initData);
-        const giveawayId = new URLSearchParams(webApp.startParam).get('giveaway_id');
+        // Получаем параметры запуска
+        const initData = tg.initDataUnsafe;
+        const startParam = tg.initParams;
+        giveawayId = startParam.split('=')[1];
 
-        async function loadGiveawayInfo() {
-            const response = await webApp.sendData(JSON.stringify({
-                action: 'get_giveaway_info',
-                giveaway_id: parseInt(giveawayId)
-            }));
-            
-            const data = JSON.parse(response);
-            if(data.status === 'success') {
-                giveawayData = data.data;
-                updateUI();
-                checkSubscriptions();
+        async function loadGiveawayData() {
+            try {
+                const response = await fetch(`/api/giveaway/${giveawayId}`, {
+                    headers: {
+                        'X-Telegram-Init-Data': JSON.stringify(initData)
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.isParticipant) {
+                    showSuccessMessage();
+                } else if (data.channels) {
+                    renderChannels(data.channels);
+                }
+            } catch (error) {
+                console.error('Error:', error);
             }
         }
 
-        function updateUI() {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('content').style.display = 'block';
-            
-            document.getElementById('giveaway-name').textContent = giveawayData.name;
-            document.getElementById('giveaway-description').textContent = giveawayData.description;
-            
-            if(!giveawayData.is_active) {
-                showResults();
-                return;
-            }
+        function handleParticipate() {
+            document.getElementById('participateSection').classList.add('hidden');
+            document.getElementById('channelsSection').classList.remove('hidden');
+        }
 
-            const channelsList = document.getElementById('channels-list');
-            giveawayData.channels.forEach(channel => {
-                const channelElement = document.createElement('div');
-                channelElement.innerHTML = `
+        function renderChannels(channels) {
+            const list = document.getElementById('channelList');
+            channels.forEach(channel => {
+                const li = document.createElement('li');
+                li.className = 'channel-item';
+                li.innerHTML = `
                     <a href="${channel.invite_link}" target="_blank">${channel.title}</a>
-                    <span class="subscription-status"></span>
                 `;
-                channelsList.appendChild(channelElement);
+                list.appendChild(li);
             });
         }
 
         async function checkSubscriptions() {
-            const channelsToCheck = giveawayData.channels.map(c => c.id);
-            const subscriptionStatus = await Promise.all(
-                channelsToCheck.map(channelId => 
-                    webApp.checkSubscription(`@${channelId}`)
-                )
-            );
-            
-            const allSubscribed = subscriptionStatus.every(status => status);
-            document.getElementById('participate-btn').disabled = !allSubscribed;
-            
-            // Обновляем статусы подписок в UI
-            document.querySelectorAll('.subscription-status').forEach((el, index) => {
-                el.textContent = subscriptionStatus[index] ? '✓' : '✗';
-                el.style.color = subscriptionStatus[index] ? 'green' : 'red';
-            });
-        }
+            try {
+                const response = await fetch('/api/check-subscriptions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': JSON.stringify(initData)
+                    },
+                    body: JSON.stringify({ giveawayId })
+                });
 
-        async function participate() {
-            const response = await webApp.sendData(JSON.stringify({
-                action: 'join_giveaway',
-                giveaway_id: giveawayId,
-                channels: giveawayData.channels
-            }));
-            
-            const result = JSON.parse(response);
-            if(result.status === 'success') {
-                document.getElementById('result-message').textContent = "Вы успешно присоединились к розыгрышу!";
-                document.getElementById('participate-btn').disabled = true;
-            } else {
-                document.getElementById('result-message').textContent = result.message;
+                const result = await response.json();
+                
+                if (result.success) {
+                    showSuccessMessage();
+                } else {
+                    alert('Подпишитесь на все каналы!');
+                }
+            } catch (error) {
+                console.error('Error:', error);
             }
         }
 
-        function showResults() {
-            document.getElementById('participate-btn').style.display = 'none';
-            if(giveawayData.winner_id) {
-                document.getElementById('result-message').textContent = 
-                    `Розыгрыш завершен! Победитель: ${giveawayData.winner_id}`;
-            } else {
-                document.getElementById('result-message').textContent = 
-                    "Розыгрыш завершен. Победитель еще не выбран.";
-            }
+        function showSuccessMessage() {
+            document.getElementById('channelsSection').classList.add('hidden');
+            document.getElementById('successMessage').classList.remove('hidden');
         }
 
-        // Инициализация
-        document.getElementById('participate-btn').addEventListener('click', participate);
-        loadGiveawayInfo();
+        // Загружаем данные при старте
+        loadGiveawayData();
     </script>
 </body>
 </html>
