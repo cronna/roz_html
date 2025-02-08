@@ -1,153 +1,178 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Розыгрыш</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            text-align: center;
-        }
-        .btn {
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .btn:disabled {
-            background-color: #ccc;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Розыгрыш</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      text-align: center;
+    }
+    .btn {
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .btn:disabled {
+      background-color: #ccc;
+    }
+  </style>
 </head>
 <body>
-    <div id="loading">Загрузка данных о розыгрыше...</div>
-    <div id="content" style="display: none;">
-        <h1 id="giveaway-name"></h1>
-        <p id="giveaway-description"></p>
-        <div id="channels-list"></div>
-        <button id="participate-btn" class="btn" disabled>Участвовать</button>
-        <div id="result-message"></div>
-    </div>
-
-    <script>
-        const webApp = Telegram.WebApp;
-        let giveawayData = null;
-
-        webApp.ready();
-        webApp.expand();
-
-        // Получаем giveaway_id из параметров запуска
-        const params = new URLSearchParams(window.location.search);
-        const giveawayId = params.get('giveaway_id');
-
-        async function loadGiveawayInfo() {
-            try {
-                const response = await fetch(`/api/giveaway/${giveawayId}`);
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    giveawayData = data.data;
-                    updateUI();
-                    checkSubscriptions();
-                } else {
-                    showError("Не удалось загрузить данные о розыгрыше.");
-                }
-            } catch (error) {
-                showError("Ошибка при загрузке данных.");
-            }
+  <div id="loading">Загрузка данных о розыгрыше...</div>
+  <div id="content" style="display: none;">
+    <h1 id="giveaway-name"></h1>
+    <p id="giveaway-description"></p>
+    <div id="channels-list"></div>
+    <button id="participate-btn" class="btn" disabled>Участвовать</button>
+    <div id="result-message"></div>
+  </div>
+  <script>
+    const webApp = Telegram.WebApp;
+    let giveawayData = null;
+    
+    // Initialize the Telegram web app
+    webApp.ready();
+    webApp.expand();
+    
+    // Get giveaway_id from URL parameters
+    const params = new URLSearchParams(window.location.search);
+    const giveawayId = params.get('giveaway_id');
+    
+    async function loadGiveawayInfo() {
+      try {
+        const response = await fetch(`/api/giveaway/${giveawayId}`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+          giveawayData = data.data;
+          updateUI();
+          
+          // Only check subscriptions if the giveaway is active
+          if (giveawayData.is_active) {
+            checkSubscriptions();
+          }
+        } else {
+          showError("Не удалось загрузить данные о розыгрыше.");
         }
-
-        function updateUI() {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('content').style.display = 'block';
-            
-            document.getElementById('giveaway-name').textContent = giveawayData.name;
-            document.getElementById('giveaway-description').textContent = giveawayData.description;
-            
-            if (!giveawayData.is_active) {
-                showResults();
-                return;
-            }
-
-            const channelsList = document.getElementById('channels-list');
-            giveawayData.channels.forEach(channel => {
-                const channelElement = document.createElement('div');
-                channelElement.innerHTML = `
-                    <a href="${channel.invite_link}" target="_blank">${channel.title}</a>
-                    <span class="subscription-status"></span>
-                `;
-                channelsList.appendChild(channelElement);
-            });
+      } catch (error) {
+        showError("Ошибка при загрузке данных.");
+      }
+    }
+    
+    function updateUI() {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      
+      document.getElementById('giveaway-name').textContent = giveawayData.name;
+      document.getElementById('giveaway-description').textContent = giveawayData.description;
+      
+      // Render the list of channels with links
+      const channelsList = document.getElementById('channels-list');
+      giveawayData.channels.forEach(channel => {
+        const channelElement = document.createElement('div');
+        channelElement.innerHTML = `
+          <a href="${channel.invite_link}" target="_blank">${channel.title}</a>
+          <span class="subscription-status"></span>
+        `;
+        channelsList.appendChild(channelElement);
+      });
+      
+      // If giveaway is not active, show the results instead
+      if (!giveawayData.is_active) {
+        showResults();
+      }
+    }
+    
+    // New version of checkSubscriptions that uses a server-side endpoint
+    async function checkSubscriptions() {
+      try {
+        // Send the user ID to your backend to verify subscriptions
+        const response = await fetch(`/api/check_subscriptions?user_id=${webApp.initDataUnsafe.user.id}`, {
+          method: 'GET'
+        });
+        const result = await response.json();
+        
+        // Assume the API returns an object like:
+        // { subscriptions: { "<channel_id>": true, "<channel_id>": false, ... } }
+        let allSubscribed = true;
+        const statuses = result.subscriptions;
+        
+        // Update the UI with subscription check statuses
+        document.querySelectorAll('.subscription-status').forEach((el, index) => {
+          const channel = giveawayData.channels[index];
+          const isSubscribed = statuses[channel.id] || false;
+          if (isSubscribed) {
+            el.textContent = ' ✓';
+            el.style.color = 'green';
+          } else {
+            el.textContent = ' ✗';
+            el.style.color = 'red';
+            allSubscribed = false;
+          }
+        });
+        
+        // Enable the participate button only if all subscriptions are valid
+        document.getElementById('participate-btn').disabled = !allSubscribed;
+      }
+      catch (error) {
+        showError("Ошибка проверки подписок.");
+      }
+    }
+    
+    async function participate() {
+      try {
+        const response = await fetch('/api/participate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            giveaway_id: giveawayId,
+            user_id: webApp.initDataUnsafe.user.id
+          })
+        });
+        
+        const result = await response.json();
+        if (result.status === 'success') {
+          document.getElementById('result-message').textContent = "Вы успешно присоединились к розыгрышу!";
+          document.getElementById('participate-btn').disabled = true;
+        } else {
+          document.getElementById('result-message').textContent = result.message;
         }
-
-        async function checkSubscriptions() {
-            const channelsToCheck = giveawayData.channels.map(c => c.id);
-            const subscriptionStatus = await Promise.all(
-                channelsToCheck.map(channelId => 
-                    webApp.checkSubscription(`@${channelId}`)
-                )
-            );
-            
-            const allSubscribed = subscriptionStatus.every(status => status);
-            document.getElementById('participate-btn').disabled = !allSubscribed;
-            
-            // Обновляем статусы подписок в UI
-            document.querySelectorAll('.subscription-status').forEach((el, index) => {
-                el.textContent = subscriptionStatus[index] ? '✓' : '✗';
-                el.style.color = subscriptionStatus[index] ? 'green' : 'red';
-            });
-        }
-
-        async function participate() {
-            try {
-                const response = await fetch('/api/participate', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        giveaway_id: giveawayId,
-                        user_id: webApp.initDataUnsafe.user.id
-                    })
-                });
-                
-                const result = await response.json();
-                if (result.status === 'success') {
-                    document.getElementById('result-message').textContent = "Вы успешно присоединились к розыгрышу!";
-                    document.getElementById('participate-btn').disabled = true;
-                } else {
-                    document.getElementById('result-message').textContent = result.message;
-                }
-            } catch (error) {
-                showError("Ошибка при отправке данных.");
-            }
-        }
-
-        function showResults() {
-            document.getElementById('participate-btn').style.display = 'none';
-            if (giveawayData.winner_id) {
-                document.getElementById('result-message').textContent = 
-                    `Розыгрыш завершен! Победитель: ${giveawayData.winner_id}`;
-            } else {
-                document.getElementById('result-message').textContent = 
-                    "Розыгрыш завершен. Победитель еще не выбран.";
-            }
-        }
-
-        function showError(message) {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('content').style.display = 'none';
-            document.body.innerHTML = `<div style="color: red;">${message}</div>`;
-        }
-
-        // Инициализация
-        document.getElementById('participate-btn').addEventListener('click', participate);
-        loadGiveawayInfo();
-    </script>
+      } catch (error) {
+        showError("Ошибка при отправке данных.");
+      }
+    }
+    
+    function showResults() {
+      document.getElementById('participate-btn').style.display = 'none';
+      if (giveawayData.winner_id) {
+        document.getElementById('result-message').textContent =
+          `Розыгрыш завершен! Победитель: ${giveawayData.winner_id}`;
+      } else {
+        document.getElementById('result-message').textContent =
+          "Розыгрыш завершен. Победитель еще не выбран.";
+      }
+    }
+    
+    function showError(message) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'none';
+      document.body.innerHTML = `<div style="color: red;">${message}</div>`;
+    }
+    
+    // Initialize the participate button listener
+    document.getElementById('participate-btn').addEventListener('click', participate);
+    
+    // Start by loading giveaway information
+    loadGiveawayInfo();
+  </script>
 </body>
 </html>
