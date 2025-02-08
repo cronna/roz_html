@@ -7,54 +7,167 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
         }
         .container {
-            text-align: center;
-            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
         }
-        button {
-            padding: 20px 40px;
-            font-size: 24px;
+        h1 {
+            color: #4CAF50;
+            text-align: center;
+        }
+        .channel-list {
+            margin: 20px 0;
+        }
+        .channel-item {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .channel-name {
+            flex-grow: 1;
+            margin-left: 10px;
+        }
+        .check-button {
+            display: block;
+            width: 100%;
+            padding: 15px;
             background: #4CAF50;
             color: white;
             border: none;
-            border-radius: 25px;
+            border-radius: 8px;
+            font-size: 18px;
             cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
+            margin-top: 20px;
         }
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
+        .check-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .winner-message {
+            text-align: center;
+            padding: 40px 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <button onclick="participate()">🎉 УЧАСТВОВАТЬ</button>
+    <div class="container" id="app">
+        <div v-if="loading" class="loading">Загрузка...</div>
+        
+        <div v-if="!loading && giveaway">
+            <div v-if="giveaway.winner">
+                <div class="winner-message">
+                    <h2>🎉 Розыгрыш завершен!</h2>
+                    <p>Победитель: @{{ giveaway.winner.username }}</p>
+                </div>
+            </div>
+            
+            <div v-else>
+                <h1>{{ giveaway.name }}</h1>
+                <p>{{ giveaway.description }}</p>
+                
+                <div class="channel-list" v-if="channels.length > 0">
+                    <div class="channel-item" v-for="channel in channels" :key="channel.id">
+                        <a :href="channel.invite_link" target="_blank" style="text-decoration: none; color: inherit;">
+                            <span>📢</span>
+                            <span class="channel-name">{{ channel.title }}</span>
+                        </a>
+                    </div>
+                </div>
+                
+                <button class="check-button" @click="checkSubscription" :disabled="isChecking">
+                    {{ isChecking ? 'Проверяем...' : '✅ Проверить подписку' }}
+                </button>
+                
+                <div v-if="error" style="color: red; margin-top: 10px;">{{ error }}</div>
+                <div v-if="success" style="color: green; margin-top: 10px;">{{ success }}</div>
+            </div>
+        </div>
     </div>
 
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script>
-        function participate() {
-            const params = new URLSearchParams(window.location.search);
-            const giveawayId = params.get('giveaway_id');
-            
-            Telegram.WebApp.sendData(JSON.stringify({
-                action: 'participate',
-                giveaway_id: giveawayId
-            }));
-            
-            // Открываем бота с командой start
-            Telegram.WebApp.openTelegramLink(`https://t.me/givegive2323bot?start=giveaway_${giveawayId}`);
-            
-            Telegram.WebApp.close();
-        }
+        const { createApp } = Vue;
+        
+        createApp({
+            data() {
+                return {
+                    loading: true,
+                    giveaway: null,
+                    channels: [],
+                    isChecking: false,
+                    error: null,
+                    success: null
+                }
+            },
+            async mounted() {
+                const params = new URLSearchParams(window.location.search);
+                const giveawayId = params.get('giveaway_id');
+                
+                try {
+                    const response = await fetch(`/api/giveaway/${giveawayId}`);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        this.giveaway = data.giveaway;
+                        this.channels = data.channels;
+                    } else {
+                        this.error = data.error || 'Ошибка загрузки данных';
+                    }
+                } catch (e) {
+                    this.error = 'Ошибка соединения с сервером';
+                } finally {
+                    this.loading = false;
+                }
+            },
+            methods: {
+                async checkSubscription() {
+                    this.isChecking = true;
+                    this.error = null;
+                    this.success = null;
+                    
+                    try {
+                        const params = new URLSearchParams(window.location.search);
+                        const giveawayId = params.get('giveaway_id');
+                        
+                        const response = await fetch('/api/participate', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                giveaway_id: giveawayId,
+                                user: Telegram.WebApp.initData
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            this.success = '🎉 Вы успешно присоединились к розыгрышу!';
+                            Telegram.WebApp.close();
+                        } else {
+                            this.error = data.error || 'Ошибка при проверке подписки';
+                        }
+                    } catch (e) {
+                        this.error = 'Ошибка соединения с сервером';
+                    } finally {
+                        this.isChecking = false;
+                    }
+                }
+            }
+        }).mount('#app');
         
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
