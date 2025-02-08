@@ -12,35 +12,38 @@
             align-items: center;
             height: 100vh;
             margin: 0;
-            background: #f0f2f5;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
         .container {
             text-align: center;
             padding: 20px;
         }
         button {
-            padding: 15px 30px;
-            font-size: 18px;
-            background: #007bff;
+            padding: 20px 40px;
+            font-size: 24px;
+            background: #4CAF50;
             color: white;
             border: none;
-            border-radius: 10px;
+            border-radius: 25px;
             cursor: pointer;
-            transition: background 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
         }
         button:hover {
-            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <button onclick="handleParticipate()">🎉 Участвовать</button>
+        <button onclick="participate()">🎉 УЧАСТВОВАТЬ</button>
     </div>
 
     <script>
-        function handleParticipate() {
-            const giveawayId = new URLSearchParams(window.location.search).get('giveaway_id');
+        function participate() {
+            const params = new URLSearchParams(window.location.search);
+            const giveawayId = params.get('giveaway_id');
             
             Telegram.WebApp.sendData(JSON.stringify({
                 action: 'participate',
