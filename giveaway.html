@@ -1,61 +1,153 @@
-from flask import Flask, jsonify, request
-from models import async_session, Giveaway, Channel
-import asyncio
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Розыгрыш</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            text-align: center;
+        }
+        .btn {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .btn:disabled {
+            background-color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Загрузка данных о розыгрыше...</div>
+    <div id="content" style="display: none;">
+        <h1 id="giveaway-name"></h1>
+        <p id="giveaway-description"></p>
+        <div id="channels-list"></div>
+        <button id="participate-btn" class="btn" disabled>Участвовать</button>
+        <div id="result-message"></div>
+    </div>
 
-app = Flask(__name__)
+    <script>
+        const webApp = Telegram.WebApp;
+        let giveawayData = null;
 
-@app.route('/api/giveaway/<int:giveaway_id>', methods=['GET'])
-async def get_giveaway(giveaway_id):
-    async with async_session() as session:
-        giveaway = await session.get(Giveaway, giveaway_id, options=[selectinload(Giveaway.channels)])
-        if not giveaway:
-            return jsonify({'status': 'error', 'message': 'Розыгрыш не найден'})
-        
-        return jsonify({
-            'status': 'success',
-            'data': {
-                'id': giveaway.id,
-                'name': giveaway.name,
-                'description': giveaway.description,
-                'is_active': giveaway.is_active,
-                'max_participants': giveaway.max_participants,
-                'participants': giveaway.participants,
-                'channels': [{
-                    'id': channel.tg_id,
-                    'title': channel.title,
-                    'invite_link': channel.invite_link
-                } for channel in giveaway.channels],
-                'winner_id': giveaway.winner_id
+        webApp.ready();
+        webApp.expand();
+
+        // Получаем giveaway_id из параметров запуска
+        const params = new URLSearchParams(window.location.search);
+        const giveawayId = params.get('giveaway_id');
+
+        async function loadGiveawayInfo() {
+            try {
+                const response = await fetch(`/api/giveaway/${giveawayId}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    giveawayData = data.data;
+                    updateUI();
+                    checkSubscriptions();
+                } else {
+                    showError("Не удалось загрузить данные о розыгрыше.");
+                }
+            } catch (error) {
+                showError("Ошибка при загрузке данных.");
             }
-        })
+        }
 
-@app.route('/api/participate', methods=['POST'])
-async def participate():
-    data = request.json
-    giveaway_id = data['giveaway_id']
-    user_id = data['user_id']
-    
-    async with async_session() as session:
-        giveaway = await session.get(Giveaway, giveaway_id)
-        if not giveaway or not giveaway.is_active:
-            return jsonify({'status': 'error', 'message': 'Розыгрыш завершен'})
-        
-        if giveaway.participants >= giveaway.max_participants:
-            return jsonify({'status': 'error', 'message': 'Лимит участников достигнут'})
-        
-        existing = await session.scalar(
-            select(GiveawayParticipant).where(
-                GiveawayParticipant.giveaway_id == giveaway_id,
-                GiveawayParticipant.user_id == user_id
-            )
-        )
-        
-        if existing:
-            return jsonify({'status': 'error', 'message': 'Вы уже участвуете'})
-        
-        session.add(GiveawayParticipant(giveaway_id=giveaway_id, user_id=user_id))
-        await session.commit()
-        return jsonify({'status': 'success'})
+        function updateUI() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            
+            document.getElementById('giveaway-name').textContent = giveawayData.name;
+            document.getElementById('giveaway-description').textContent = giveawayData.description;
+            
+            if (!giveawayData.is_active) {
+                showResults();
+                return;
+            }
 
-if __name__ == '__main__':
-    app.run(port=5000)
+            const channelsList = document.getElementById('channels-list');
+            giveawayData.channels.forEach(channel => {
+                const channelElement = document.createElement('div');
+                channelElement.innerHTML = `
+                    <a href="${channel.invite_link}" target="_blank">${channel.title}</a>
+                    <span class="subscription-status"></span>
+                `;
+                channelsList.appendChild(channelElement);
+            });
+        }
+
+        async function checkSubscriptions() {
+            const channelsToCheck = giveawayData.channels.map(c => c.id);
+            const subscriptionStatus = await Promise.all(
+                channelsToCheck.map(channelId => 
+                    webApp.checkSubscription(`@${channelId}`)
+                )
+            );
+            
+            const allSubscribed = subscriptionStatus.every(status => status);
+            document.getElementById('participate-btn').disabled = !allSubscribed;
+            
+            // Обновляем статусы подписок в UI
+            document.querySelectorAll('.subscription-status').forEach((el, index) => {
+                el.textContent = subscriptionStatus[index] ? '✓' : '✗';
+                el.style.color = subscriptionStatus[index] ? 'green' : 'red';
+            });
+        }
+
+        async function participate() {
+            try {
+                const response = await fetch('/api/participate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        giveaway_id: giveawayId,
+                        user_id: webApp.initDataUnsafe.user.id
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    document.getElementById('result-message').textContent = "Вы успешно присоединились к розыгрышу!";
+                    document.getElementById('participate-btn').disabled = true;
+                } else {
+                    document.getElementById('result-message').textContent = result.message;
+                }
+            } catch (error) {
+                showError("Ошибка при отправке данных.");
+            }
+        }
+
+        function showResults() {
+            document.getElementById('participate-btn').style.display = 'none';
+            if (giveawayData.winner_id) {
+                document.getElementById('result-message').textContent = 
+                    `Розыгрыш завершен! Победитель: ${giveawayData.winner_id}`;
+            } else {
+                document.getElementById('result-message').textContent = 
+                    "Розыгрыш завершен. Победитель еще не выбран.";
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            document.body.innerHTML = `<div style="color: red;">${message}</div>`;
+        }
+
+        // Инициализация
+        document.getElementById('participate-btn').addEventListener('click', participate);
+        loadGiveawayInfo();
+    </script>
+</body>
+</html>
