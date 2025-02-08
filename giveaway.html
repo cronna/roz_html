@@ -50,6 +50,9 @@
                 giveaway_id: giveawayId
             }));
             
+            // Открываем бота с командой start
+            Telegram.WebApp.openTelegramLink(`https://t.me/givegive2323bot?start=giveaway_${giveawayId}`);
+            
             Telegram.WebApp.close();
         }
         
